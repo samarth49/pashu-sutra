@@ -5,7 +5,7 @@
  * Generates a PDF using expo-print and allows sharing via expo-sharing.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -21,9 +21,14 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { COLORS } from '../config/constants';
-import { getVaccinations, getAnimal, getSensorHistory } from '../services/databaseService';
+import { getVaccinations, getAnimal, getSensorHistory, getMilkLogs, getPregnancies } from '../services/databaseService';
+import { useTranslation } from '../i18n/LanguageContext';
+import { useAnimal } from '../context/AnimalContext';
 
 export default function ReportsScreen() {
+  const { t } = useTranslation();
+  const { selectedAnimal } = useAnimal();
+
   const [animalDetails, setAnimalDetails] = useState({
     name: '',
     id: '',
@@ -31,7 +36,19 @@ export default function ReportsScreen() {
     owner: ''
   });
   const [loading, setLoading] = useState(false);
-  const [reportType, setReportType] = useState('health'); // 'health' | 'activity'
+  const [reportType, setReportType] = useState('health');
+
+  // Auto-fill fields when a selected animal is available
+  useEffect(() => {
+    if (selectedAnimal) {
+      setAnimalDetails({
+        name: selectedAnimal.name || '',
+        id: selectedAnimal.id || '',
+        rfid: selectedAnimal.rfid || '',
+        owner: selectedAnimal.owner || '',
+      });
+    }
+  }, [selectedAnimal]);
 
   const generateReport = async () => {
     if (!animalDetails.id.trim() && !animalDetails.rfid.trim()) {
@@ -59,11 +76,13 @@ export default function ReportsScreen() {
 
       // Fetch persistent sensor history from Firestore
       const idToSearch = animalDetails.id || 'Unknown';
-      const [tempData, bpmData, battData, geoData] = await Promise.all([
+      const [tempData, bpmData, battData, geoData, milkLogs, pregnancies] = await Promise.all([
         getSensorHistory(idToSearch, 'temperature', 50),
         getSensorHistory(idToSearch, 'bpm', 50),
         getSensorHistory(idToSearch, 'battery', 10),
-        getSensorHistory(idToSearch, 'geofence', 50)
+        getSensorHistory(idToSearch, 'geofence', 50),
+        getMilkLogs(idToSearch, 60),
+        getPregnancies(idToSearch),
       ]);
 
       // Calculate Averages
@@ -74,8 +93,14 @@ export default function ReportsScreen() {
       // Only keep Outside events for activity log
       const outsideEvents = geoData.filter(g => String(g.value).toLowerCase().includes('outside'));
 
+      // Calculate milk daily averages
+      const milkByDay = {};
+      milkLogs.forEach(l => {
+        milkByDay[l.date] = (milkByDay[l.date] || 0) + (l.litres || 0);
+      });
+
       // 2. Generate HTML
-      const html = generateHTML(animalDetails, animalVax, avgTemp, avgBpm, lastBattery, lastLoc, outsideEvents);
+      const html = generateHTML(animalDetails, animalVax, avgTemp, avgBpm, lastBattery, lastLoc, outsideEvents, milkByDay, pregnancies);
 
       // 3. Create PDF
       const { uri } = await Print.printToFileAsync({ html });
@@ -95,7 +120,7 @@ export default function ReportsScreen() {
     setLoading(false);
   };
 
-  const generateHTML = (details, vax, avgTemp, avgBpm, lastBattery, lastLoc, outsideEvents) => {
+  const generateHTML = (details, vax, avgTemp, avgBpm, lastBattery, lastLoc, outsideEvents, milkByDay = {}, pregnancies = []) => {
     const date = new Date().toLocaleString();
     
     // Rows for vaccination table
@@ -115,6 +140,29 @@ export default function ReportsScreen() {
         <td>${g.value}</td>
       </tr>
     `).join('');
+
+    // Rows for milk daily-average table
+    const milkDays = Object.keys(milkByDay).sort().reverse().slice(0, 30);
+    const milkRows = milkDays.map(day => {
+      const total = milkByDay[day].toFixed(1);
+      const sessions = (vax => vax)(0); // placeholder
+      return `<tr><td>${day}</td><td>${total} L</td></tr>`;
+    }).join('');
+    const milkTotal = milkDays.reduce((s, d) => s + milkByDay[d], 0).toFixed(1);
+    const milkAvg = milkDays.length ? (milkTotal / milkDays.length).toFixed(1) : '--';
+
+    // Rows for pregnancy table
+    const pregnancyRows = pregnancies.slice(0, 10).map(p => {
+      const statusColor = p.status === 'pregnant' ? '#2E7D32' : p.status === 'delivered' ? '#1565C0' : '#B71C1C';
+      return `
+        <tr>
+          <td>${p.matingDate || '-'}</td>
+          <td>${p.expectedDelivery || '-'}</td>
+          <td style="color: ${statusColor}; font-weight: bold">${(p.status || '').toUpperCase()}</td>
+          <td>${p.method || '-'}</td>
+          <td>${p.actualDelivery || '-'}</td>
+        </tr>`;
+    }).join('');
 
     return `
       <!DOCTYPE html>
@@ -194,6 +242,48 @@ export default function ReportsScreen() {
               <div class="card-value">${lastLoc}</div>
             </div>
           </div>
+        </div>
+
+        <!-- 🥛 Milk Production Section -->
+        <div class="section">
+          <div class="section-title">🥛 Milk Production Log</div>
+          <div class="grid" style="margin-bottom: 12px">
+            <div class="card" style="border-left-color: #2E7D32">
+              <div class="card-label">Total (shown period)</div>
+              <div class="card-value">${milkTotal} L</div>
+            </div>
+            <div class="card" style="border-left-color: #0288D1">
+              <div class="card-label">Daily Average</div>
+              <div class="card-value">${milkAvg} L/day</div>
+            </div>
+            <div class="card" style="border-left-color: #6A1B9A">
+              <div class="card-label">Days Recorded</div>
+              <div class="card-value">${milkDays.length}</div>
+            </div>
+          </div>
+          ${milkRows.length ? `
+            <table>
+              <tr><th>Date</th><th>Total Yield (L)</th></tr>
+              ${milkRows}
+            </table>
+          ` : '<p>No milk logs recorded yet.</p>'}
+        </div>
+
+        <!-- 🤰 Pregnancy Section -->
+        <div class="section">
+          <div class="section-title">🤰 Pregnancy Records</div>
+          ${pregnancyRows.length ? `
+            <table>
+              <tr>
+                <th>Mating Date</th>
+                <th>Expected Delivery</th>
+                <th>Status</th>
+                <th>Method</th>
+                <th>Actual Delivery</th>
+              </tr>
+              ${pregnancyRows}
+            </table>
+          ` : '<p>No pregnancy records found.</p>'}
         </div>
 
         <div class="section">

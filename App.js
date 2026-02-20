@@ -1,7 +1,8 @@
 /**
  * Pashu-Sutra App
  * Main entry point — wraps the app with Paper provider and Navigation.
- * Also runs vaccination reminder checker on startup and periodically.
+ * Runs vaccination reminder checker on startup and periodically.
+ * Flushes offline write queue by polling connectivity every 30s.
  */
 
 import React, { useEffect } from 'react';
@@ -10,6 +11,9 @@ import { PaperProvider, MD3LightTheme } from 'react-native-paper';
 import AppNavigator from './src/navigation/AppNavigator';
 import { COLORS, INTERVALS } from './src/config/constants';
 import { checkVaccinationReminders } from './src/services/vaccinationChecker';
+import { LanguageProvider } from './src/i18n/LanguageContext';
+import { AnimalProvider } from './src/context/AnimalContext';
+import { flushQueue, getPendingCount, isOnline } from './src/services/offlineService';
 
 const theme = {
   ...MD3LightTheme,
@@ -24,22 +28,33 @@ const theme = {
 
 export default function App() {
   useEffect(() => {
-    // Check vaccination reminders on app start
+    // ── Vaccination reminders ────────────────────────────────────────
     checkVaccinationReminders();
+    const vacInterval = setInterval(checkVaccinationReminders, INTERVALS.VACCINATION_CHECK_MS);
 
-    // Then check periodically (every hour by default)
-    const interval = setInterval(
-      checkVaccinationReminders,
-      INTERVALS.VACCINATION_CHECK_MS
-    );
+    // ── Offline queue: poll every 30s and flush if back online ──────
+    const offlineInterval = setInterval(async () => {
+      const pending = await getPendingCount();
+      if (pending > 0 && await isOnline()) {
+        console.log(`[App] Online again. Flushing ${pending} queued items...`);
+        await flushQueue();
+      }
+    }, 30000);
 
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(vacInterval);
+      clearInterval(offlineInterval);
+    };
   }, []);
 
   return (
-    <PaperProvider theme={theme}>
-      <StatusBar style="light" backgroundColor={COLORS.primaryDark} />
-      <AppNavigator />
-    </PaperProvider>
+    <LanguageProvider>
+      <AnimalProvider>
+        <PaperProvider theme={theme}>
+          <StatusBar style="light" backgroundColor={COLORS.primaryDark} />
+          <AppNavigator />
+        </PaperProvider>
+      </AnimalProvider>
+    </LanguageProvider>
   );
 }

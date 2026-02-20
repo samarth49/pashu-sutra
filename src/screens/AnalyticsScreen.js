@@ -20,6 +20,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { LineChart, BarChart, PieChart } from 'react-native-chart-kit';
 import { COLORS } from '../config/constants';
 import { fetchFeedData } from '../services/adafruitService';
+import { useTranslation } from '../i18n/LanguageContext';
 
 const { width } = Dimensions.get('window');
 const CHART_WIDTH = width - 32;
@@ -39,6 +40,7 @@ const chartConfig = {
 };
 
 export default function AnalyticsScreen() {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedRange, setSelectedRange] = useState('24h');
@@ -199,14 +201,18 @@ export default function AnalyticsScreen() {
     >
       {/* Time Range Selector */}
       <View style={styles.rangeSelector}>
-        {['24h', '7d', '30d'].map((range) => (
+        {[
+          { key: '24h', label: t('analytics.last24h') },
+          { key: '7d',  label: t('analytics.last7d') },
+          { key: '30d', label: t('analytics.last30d') },
+        ].map((range) => (
           <TouchableOpacity
-            key={range}
-            style={[styles.rangeButton, selectedRange === range && styles.rangeButtonActive]}
-            onPress={() => setSelectedRange(range)}
+            key={range.key}
+            style={[styles.rangeButton, selectedRange === range.key && styles.rangeButtonActive]}
+            onPress={() => setSelectedRange(range.key)}
           >
-            <Text style={[styles.rangeText, selectedRange === range && styles.rangeTextActive]}>
-              {range}
+            <Text style={[styles.rangeText, selectedRange === range.key && styles.rangeTextActive]}>
+              {range.label}
             </Text>
           </TouchableOpacity>
         ))}
@@ -221,7 +227,7 @@ export default function AnalyticsScreen() {
             
             {/* Geofence Pie Chart */}
              <View style={styles.card}>
-                <Text style={styles.chartTitle}>Geofence Status Ratio</Text>
+                <Text style={styles.chartTitle}>{t('analytics.geofenceStatus')}</Text>
                 {geofenceData.length > 0 ? (
                   <PieChart
                     data={geofenceData}
@@ -235,53 +241,47 @@ export default function AnalyticsScreen() {
                     absolute
                   />
                 ) : (
-                  <Text style={styles.noData}>No Geofence data available</Text>
+                  <Text style={styles.noData}>{t('common.noData')}</Text>
                 )}
             </View>
 
             {/* Temperature Line Chart */}
             <View style={styles.card}>
-                <Text style={styles.chartTitle}>Temperature Trend (°C)</Text>
+                <Text style={styles.chartTitle}>{t('analytics.temperatureTrend')} (°C)</Text>
                 {tempData ? (
                    <LineChart
                     data={tempData}
-                    width={CHART_WIDTH - 32} // Card padding
+                    width={CHART_WIDTH - 32}
                     height={220}
-                    chartConfig={{
-                      ...chartConfig,
-                      color: (opacity = 1) => `rgba(255, 99, 71, ${opacity})`, // Red
-                    }}
+                    chartConfig={{ ...chartConfig, color: (opacity = 1) => `rgba(255, 99, 71, ${opacity})` }}
                     bezier
                     style={styles.chart}
                   />
                 ) : (
-                   <Text style={styles.noData}>No Temperature data available</Text>
+                   <Text style={styles.noData}>{t('common.noData')}</Text>
                 )}
             </View>
 
              {/* BPM Line Chart */}
              <View style={styles.card}>
-                <Text style={styles.chartTitle}>Heart Rate Trend (BPM)</Text>
+                <Text style={styles.chartTitle}>{t('analytics.heartRateTrend')} (BPM)</Text>
                 {bpmData ? (
                    <LineChart
                     data={bpmData}
                     width={CHART_WIDTH - 32}
                     height={220}
-                    chartConfig={{
-                      ...chartConfig,
-                      color: (opacity = 1) => `rgba(233, 30, 99, ${opacity})`, // Pink
-                    }}
+                    chartConfig={{ ...chartConfig, color: (opacity = 1) => `rgba(233, 30, 99, ${opacity})` }}
                     bezier
                     style={styles.chart}
                   />
                 ) : (
-                   <Text style={styles.noData}>No Heart Rate data available</Text>
+                   <Text style={styles.noData}>{t('common.noData')}</Text>
                 )}
             </View>
 
-            {/* Battery Bar Chart (Requested to keep as Bar) */}
+            {/* Battery Bar Chart */}
             <View style={styles.card}>
-                <Text style={styles.chartTitle}>Avg Battery Level (%)</Text>
+                <Text style={styles.chartTitle}>{t('analytics.batteryLevel')} (%)</Text>
                 {batteryData ? (
                    <BarChart
                     data={batteryData}
@@ -289,34 +289,28 @@ export default function AnalyticsScreen() {
                     height={220}
                     yAxisLabel=""
                     yAxisSuffix="%"
-                    chartConfig={{
-                      ...chartConfig,
-                      color: (opacity = 1) => `rgba(255, 165, 0, ${opacity})`, // Orange
-                    }}
+                    chartConfig={{ ...chartConfig, color: (opacity = 1) => `rgba(255, 165, 0, ${opacity})` }}
                     style={styles.chart}
                   />
                 ) : (
-                   <Text style={styles.noData}>No Battery data available</Text>
+                   <Text style={styles.noData}>{t('common.noData')}</Text>
                 )}
             </View>
 
              {/* Humidity Line Chart */}
              <View style={styles.card}>
-                <Text style={styles.chartTitle}>Humidity Trend (%)</Text>
+                <Text style={styles.chartTitle}>{t('dashboard.humidity')} (%)</Text>
                 {humidityData ? (
                    <LineChart
                     data={humidityData}
                     width={CHART_WIDTH - 32}
                     height={220}
-                    chartConfig={{
-                      ...chartConfig,
-                      color: (opacity = 1) => `rgba(2, 136, 209, ${opacity})`, // Blue
-                    }}
+                    chartConfig={{ ...chartConfig, color: (opacity = 1) => `rgba(2, 136, 209, ${opacity})` }}
                     bezier
                     style={styles.chart}
                   />
                 ) : (
-                   <Text style={styles.noData}>No Humidity data available</Text>
+                   <Text style={styles.noData}>{t('common.noData')}</Text>
                 )}
             </View>
 

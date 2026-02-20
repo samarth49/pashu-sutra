@@ -112,22 +112,90 @@ export async function deleteVaccination(id) {
  */
 export async function getAnimal(identifier) {
   try {
-    // Try by ID first
     let q = query(collection(db, ANIMALS_COL), where('id', '==', identifier));
     let snapshot = await getDocs(q);
     
-    // If not found, try by RFID
     if (snapshot.empty) {
       q = query(collection(db, ANIMALS_COL), where('rfid', '==', identifier));
       snapshot = await getDocs(q);
     }
 
     if (!snapshot.empty) {
-      return { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
+      return { docId: snapshot.docs[0].id, ...snapshot.docs[0].data() };
     }
     return null;
   } catch (e) {
     console.error('[DB] Error fetching animal:', e);
+    return null;
+  }
+}
+
+/**
+ * Get all animals from Firestore.
+ */
+export async function getAnimals() {
+  try {
+    const q = query(collection(db, ANIMALS_COL), orderBy('createdAt', 'desc'));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => ({ docId: doc.id, ...doc.data() }));
+  } catch (e) {
+    console.error('[DB] Error fetching animals:', e);
+    return [];
+  }
+}
+
+/**
+ * Add a new animal to Firestore.
+ */
+export async function addAnimal(animal) {
+  try {
+    const record = { ...animal, createdAt: new Date().toISOString() };
+    const docRef = await addDoc(collection(db, ANIMALS_COL), record);
+    return { docId: docRef.id, ...record };
+  } catch (e) {
+    console.error('[DB] Error adding animal:', e);
+    return null;
+  }
+}
+
+/**
+ * Delete an animal from Firestore by document ID.
+ */
+export async function deleteAnimal(docId) {
+  try {
+    await deleteDoc(doc(db, ANIMALS_COL, docId));
+    return true;
+  } catch (e) {
+    console.error('[DB] Error deleting animal:', e);
+    return false;
+  }
+}
+
+/**
+ * Fetch the most recent GPS record for a given animal.
+ * Returns { latitude, longitude } or null if not found.
+ */
+export async function getLastGPS(animalId) {
+  try {
+    const q = query(
+      collection(db, SENSOR_DATA_COL),
+      where('animalId', '==', animalId),
+      where('type', '==', 'gpsloc'),
+      orderBy('created_at', 'desc'),
+      limit(1)
+    );
+    const snapshot = await getDocs(q);
+    if (snapshot.empty) return null;
+    const raw = snapshot.docs[0].data().value;
+    const parts = String(raw).split(',');
+    if (parts.length >= 2) {
+      const lat = parseFloat(parts[0]);
+      const lon = parseFloat(parts[1]);
+      if (!isNaN(lat) && !isNaN(lon)) return { latitude: lat, longitude: lon };
+    }
+    return null;
+  } catch (e) {
+    console.error('[DB] Error fetching last GPS:', e);
     return null;
   }
 }
@@ -261,5 +329,141 @@ export async function markReminderSent(key) {
   if (!sent.includes(key)) {
     sent.push(key);
     await saveList(KEYS.SENT_REMINDERS, sent);
+  }
+}
+
+// ─── Milk Production Log (Firestore) ────────────────────────────────
+
+const MILK_COL = 'milk_logs';
+const PREGNANCY_COL = 'pregnancies';
+
+/**
+ * Add a milk log entry.
+ * @param {Object} entry - { animalId, date, session, litres, notes }
+ */
+export async function addMilkLog(entry) {
+  try {
+    const record = { ...entry, createdAt: new Date().toISOString() };
+    const docRef = await addDoc(collection(db, MILK_COL), record);
+    return { id: docRef.id, ...record };
+  } catch (e) {
+    console.error('[DB] Error adding milk log:', e);
+    return null;
+  }
+}
+
+/**
+ * Get milk logs for a specific animal, newest first.
+ * @param {string} animalId
+ * @param {number} limitNum
+ */
+export async function getMilkLogs(animalId, limitNum = 60) {
+  try {
+    const q = query(
+      collection(db, MILK_COL),
+      where('animalId', '==', animalId),
+      limit(limitNum)
+    );
+    const snapshot = await getDocs(q);
+    const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+    // Sort newest first in-memory (avoids needing a composite Firestore index)
+    return docs.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  } catch (e) {
+    console.error('[DB] Error fetching milk logs:', e);
+    return [];
+  }
+}
+
+/**
+ * Delete a milk log entry.
+ */
+export async function deleteMilkLog(docId) {
+  try {
+    await deleteDoc(doc(db, MILK_COL, docId));
+    return true;
+  } catch (e) {
+    console.error('[DB] Error deleting milk log:', e);
+    return false;
+  }
+}
+
+// ─── Pregnancy Tracker (Firestore) ──────────────────────────────────
+
+/** Gestation periods in days per species */
+export const GESTATION_DAYS = {
+  cow: 283,
+  buffalo: 310,
+  goat: 150,
+  sheep: 147,
+};
+
+/**
+ * Add a pregnancy record.
+ * @param {Object} record - { animalId, species, matingDate, method, notes }
+ */
+export async function addPregnancy(record) {
+  try {
+    const days = GESTATION_DAYS[record.species?.toLowerCase()] || 283;
+    const mating = new Date(record.matingDate);
+    const due = new Date(mating.getTime() + days * 24 * 60 * 60 * 1000);
+    const newRecord = {
+      ...record,
+      gestationDays: days,
+      expectedDelivery: due.toISOString().split('T')[0], // YYYY-MM-DD
+      status: 'pregnant',
+      createdAt: new Date().toISOString(),
+    };
+    const docRef = await addDoc(collection(db, PREGNANCY_COL), newRecord);
+    return { id: docRef.id, ...newRecord };
+  } catch (e) {
+    console.error('[DB] Error adding pregnancy:', e);
+    return null;
+  }
+}
+
+/**
+ * Get pregnancy records for an animal.
+ */
+export async function getPregnancies(animalId) {
+  try {
+    const q = query(
+      collection(db, PREGNANCY_COL),
+      where('animalId', '==', animalId)
+    );
+    const snapshot = await getDocs(q);
+    const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+    // Sort newest first in-memory (avoids needing a composite Firestore index)
+    return docs.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  } catch (e) {
+    console.error('[DB] Error fetching pregnancies:', e);
+    return [];
+  }
+}
+
+/**
+ * Update pregnancy status (delivered / aborted).
+ */
+export async function updatePregnancyStatus(docId, status, deliveryDate = null) {
+  try {
+    const updates = { status };
+    if (deliveryDate) updates.actualDelivery = deliveryDate;
+    await updateDoc(doc(db, PREGNANCY_COL, docId), updates);
+    return true;
+  } catch (e) {
+    console.error('[DB] Error updating pregnancy:', e);
+    return false;
+  }
+}
+
+/**
+ * Delete a pregnancy record.
+ */
+export async function deletePregnancy(docId) {
+  try {
+    await deleteDoc(doc(db, PREGNANCY_COL, docId));
+    return true;
+  } catch (e) {
+    console.error('[DB] Error deleting pregnancy:', e);
+    return false;
   }
 }

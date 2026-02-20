@@ -24,6 +24,7 @@ import {
   updateVaccination,
   deleteVaccination,
 } from '../services/databaseService';
+import { useTranslation } from '../i18n/LanguageContext';
 
 // ─── Common Vaccines for Quick Select ─────────────────────────────
 const COMMON_VACCINES = [
@@ -38,6 +39,7 @@ const COMMON_VACCINES = [
 ];
 
 export default function HealthScreen() {
+  const { t } = useTranslation();
   const [vaccinations, setVaccinations] = useState([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [filter, setFilter] = useState('all'); // all | scheduled | completed
@@ -94,10 +96,10 @@ export default function HealthScreen() {
   };
 
   const handleDelete = (id) => {
-    Alert.alert('Delete Record', 'Are you sure you want to delete this record?', [
-      { text: 'Cancel', style: 'cancel' },
+    Alert.alert(t('common.confirm'), t('animals.deleteConfirm'), [
+      { text: t('common.cancel'), style: 'cancel' },
       {
-        text: 'Delete',
+        text: t('common.delete'),
         style: 'destructive',
         onPress: async () => {
           await deleteVaccination(id);
@@ -121,11 +123,11 @@ export default function HealthScreen() {
       <View style={styles.summaryRow}>
         <View style={[styles.summaryCard, { borderLeftColor: COLORS.warning }]}>
           <Text style={styles.summaryNumber}>{scheduledCount}</Text>
-          <Text style={styles.summaryLabel}>Scheduled</Text>
+          <Text style={styles.summaryLabel}>{t('health.scheduled')}</Text>
         </View>
         <View style={[styles.summaryCard, { borderLeftColor: COLORS.safe }]}>
           <Text style={styles.summaryNumber}>{completedCount}</Text>
-          <Text style={styles.summaryLabel}>Completed</Text>
+          <Text style={styles.summaryLabel}>{t('health.completed')}</Text>
         </View>
         <View style={[styles.summaryCard, { borderLeftColor: COLORS.primary }]}>
           <Text style={styles.summaryNumber}>{vaccinations.length}</Text>
@@ -136,21 +138,16 @@ export default function HealthScreen() {
       {/* Filter Tabs */}
       <View style={styles.filterRow}>
         {[
-          { key: 'all', label: 'All' },
-          { key: 'scheduled', label: 'Scheduled' },
-          { key: 'completed', label: 'Completed' },
+          { key: 'all',       label: t('common.select') },
+          { key: 'scheduled', label: t('health.scheduled') },
+          { key: 'completed', label: t('health.completed') },
         ].map((f) => (
           <TouchableOpacity
             key={f.key}
             style={[styles.filterBtn, filter === f.key && styles.filterBtnActive]}
             onPress={() => setFilter(f.key)}
           >
-            <Text
-              style={[
-                styles.filterBtnText,
-                filter === f.key && styles.filterBtnTextActive,
-              ]}
-            >
+            <Text style={[styles.filterBtnText, filter === f.key && styles.filterBtnTextActive]}>
               {f.label}
             </Text>
           </TouchableOpacity>
@@ -162,10 +159,8 @@ export default function HealthScreen() {
         {filteredVaccinations.length === 0 ? (
           <View style={styles.emptyState}>
             <MaterialCommunityIcons name="needle" size={48} color={COLORS.textSecondary} />
-            <Text style={styles.emptyText}>No vaccination records</Text>
-            <Text style={styles.emptySubtext}>
-              Tap + to add a new record
-            </Text>
+            <Text style={styles.emptyText}>{t('health.noRecords')}</Text>
+            <Text style={styles.emptySubtext}>{t('health.addRecord')}</Text>
           </View>
         ) : (
           filteredVaccinations.map((vac) => (
@@ -226,7 +221,7 @@ export default function HealthScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Add Vaccination</Text>
+              <Text style={styles.modalTitle}>{t('health.addVaccination')}</Text>
               <TouchableOpacity onPress={() => setShowAddModal(false)}>
                 <MaterialCommunityIcons name="close" size={24} color={COLORS.textSecondary} />
               </TouchableOpacity>
@@ -234,7 +229,7 @@ export default function HealthScreen() {
 
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
             {/* Vaccine Dropdown */}
-            <Text style={styles.inputLabel}>Vaccine Name</Text>
+            <Text style={styles.inputLabel}>{t('health.vaccineName')}</Text>
             <TouchableOpacity
               style={styles.dropdownTrigger}
               onPress={() => setShowVaccineDropdown(!showVaccineDropdown)}
@@ -294,7 +289,7 @@ export default function HealthScreen() {
               placeholderTextColor={COLORS.textSecondary}
             />
 
-            <Text style={styles.inputLabel}>Animal ID / Tag</Text>
+            <Text style={styles.inputLabel}>{t('health.animalId')}</Text>
             <TextInput
               style={styles.input}
               placeholder="e.g. COW-001"
@@ -303,7 +298,7 @@ export default function HealthScreen() {
               placeholderTextColor={COLORS.textSecondary}
             />
 
-            <Text style={styles.inputLabel}>RFID Tag</Text>
+            <Text style={styles.inputLabel}>{t('health.rfidTag')}</Text>
             <TextInput
               style={styles.input}
               placeholder="e.g. RFID-00234"
@@ -312,7 +307,7 @@ export default function HealthScreen() {
               placeholderTextColor={COLORS.textSecondary}
             />
 
-            <Text style={styles.inputLabel}>Date (DD/MM/YYYY)</Text>
+            <Text style={styles.inputLabel}>{t('health.date')} (DD/MM/YYYY)</Text>
             <TextInput
               style={styles.input}
               placeholder="e.g. 25/02/2026"
@@ -321,7 +316,7 @@ export default function HealthScreen() {
               placeholderTextColor={COLORS.textSecondary}
             />
 
-            <Text style={styles.inputLabel}>Notes (optional)</Text>
+            <Text style={styles.inputLabel}>{t('health.notes')}</Text>
             <TextInput
               style={[styles.input, styles.notesInput]}
               placeholder="Any additional notes..."
@@ -333,7 +328,7 @@ export default function HealthScreen() {
 
             <TouchableOpacity style={styles.saveBtn} onPress={handleAdd}>
               <MaterialCommunityIcons name="content-save" size={20} color="#fff" />
-              <Text style={styles.saveBtnText}>Save Record</Text>
+              <Text style={styles.saveBtnText}>{t('common.save')}</Text>
             </TouchableOpacity>
             <View style={{ height: 20 }} />
             </ScrollView>

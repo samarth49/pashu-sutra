@@ -3,51 +3,63 @@ const readline = require('readline');
 
 // ─── Configuration ───────────────────────────────────────────────────
 
-// COPIED FROM constants.js
 const ADAFRUIT_IO = {
   USERNAME: 'ProtonX',
   AIO_KEY: 'aio_CgEp823IbWQjikfQCBoZq7QRaeDx',
   BROKER: 'io.adafruit.com',
-  PORT: 8883, // MQTT Secure Port
+  PORT: 8883,
 };
 
 const FEED_PREFIX = `${ADAFRUIT_IO.USERNAME}/feeds`;
 const FEEDS = {
-  GPS: `${FEED_PREFIX}/gpsloc`,
-  BATTERY: `${FEED_PREFIX}/battery`,
-  BPM: `${FEED_PREFIX}/bpm`,
-  TEMP: `${FEED_PREFIX}/temperature`,
+  GPS:      `${FEED_PREFIX}/gpsloc`,
+  BATTERY:  `${FEED_PREFIX}/battery`,
+  BPM:      `${FEED_PREFIX}/bpm`,
+  TEMP:     `${FEED_PREFIX}/temperature`,
   HUMIDITY: `${FEED_PREFIX}/humidity`,
   GEOFENCE: `${FEED_PREFIX}/geofence`,
 };
 
-// Center of Geofence (Updated from constants.js)
 const GEOFENCE_CENTER = { lat: 18.47011077655484, lon: 73.86976837618745 };
 
-// ─── Simulation States ───────────────────────────────────────────────
+// ─── Registered Animals ──────────────────────────────────────────────
+// Add more animals here to simulate a full herd.
 
-const MODES = {
-  1: { name: 'NORMAL (Healthy, Safe)',     temp: 37.5, bpm: 75,  batt: 85,  lat: 0, lon: 0 },
-  2: { name: 'LOW BATTERY (< 20%)',        temp: 37.5, bpm: 75,  batt: 15,  lat: 0, lon: 0 },
-  3: { name: 'HIGH TEMP (> 39.5°C)',       temp: 40.5, bpm: 75,  batt: 80,  lat: 0, lon: 0 },
-  4: { name: 'HIGH BPM (> 100)',           temp: 37.5, bpm: 110, batt: 80,  lat: 0, lon: 0 },
-  5: { name: 'GEOFENCE BREACH (Outside)',  temp: 37.5, bpm: 75,  batt: 80,  lat: 0.005, lon: 0.005 }, // Offset to be outside
+const ANIMALS = {
+  1: { id: 'Cow-001',     rfid: 'Rfid-001', name: 'Lakshmi  (Cow)',     baseLat:  0.0000, baseLon:  0.0000 }, // at center
+  2: { id: 'Cow-002',     rfid: 'Rfid-002', name: 'Nandini  (Cow)',     baseLat:  0.0003, baseLon:  0.0003 }, // ~35m NE
+  3: { id: 'Buffalo-001', rfid: 'Rfid-003', name: 'Kaali    (Buffalo)', baseLat: -0.0003, baseLon:  0.0003 }, // ~35m SE
+  4: { id: 'Goat-001',    rfid: 'Rfid-004', name: 'Meenu    (Goat)',    baseLat:  0.0003, baseLon: -0.0003 }, // ~35m NW
 };
 
-// ─── Helper Functions ────────────────────────────────────────────────
+// ─── Simulation Modes ────────────────────────────────────────────────
+
+const MODES = {
+  1: { name: 'NORMAL (Healthy, Safe)',    temp: 37.5, bpm: 75,  batt: 85, lat: 0,     lon: 0 },
+  2: { name: 'LOW BATTERY (< 20%)',       temp: 37.5, bpm: 75,  batt: 15, lat: 0,     lon: 0 },
+  3: { name: 'HIGH TEMP (> 39.5°C)',      temp: 40.5, bpm: 75,  batt: 80, lat: 0,     lon: 0 },
+  4: { name: 'HIGH BPM (> 100)',          temp: 37.5, bpm: 110, batt: 80, lat: 0,     lon: 0 },
+  5: { name: 'GEOFENCE BREACH (Outside)', temp: 37.5, bpm: 75,  batt: 80, lat: 0.005, lon: 0.005 },
+};
+
+// ─── Helpers ────────────────────────────────────────────────────────
 
 function jitter(value, amount = 0.5) {
   return value + (Math.random() * amount * 2 - amount);
 }
 
 function getGPS(baseLat, baseLon, offsetLat, offsetLon) {
-  // Add small random movement
   const lat = baseLat + offsetLat + (Math.random() * 0.0002 - 0.0001);
   const lon = baseLon + offsetLon + (Math.random() * 0.0002 - 0.0001);
-  return `${lat.toFixed(6)},${lon.toFixed(6)},0`; // 0 is altitude
+  return `${lat.toFixed(6)},${lon.toFixed(6)},0`;
 }
 
-// ─── Main Script ─────────────────────────────────────────────────────
+function publish(feed, animal, val) {
+  const payload = JSON.stringify({ id: animal.id, rfid: animal.rfid, val });
+  client.publish(feed, payload);
+}
+
+// ─── MQTT Setup ──────────────────────────────────────────────────────
 
 const client = mqtt.connect(`mqtts://${ADAFRUIT_IO.BROKER}`, {
   port: ADAFRUIT_IO.PORT,
@@ -55,14 +67,11 @@ const client = mqtt.connect(`mqtts://${ADAFRUIT_IO.BROKER}`, {
   password: ADAFRUIT_IO.AIO_KEY,
 });
 
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout
-});
+const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
 client.on('connect', () => {
   console.log(`\n✅ Connected to Adafruit IO as ${ADAFRUIT_IO.USERNAME}`);
-  startMenu();
+  selectAnimal();
 });
 
 client.on('error', (err) => {
@@ -70,83 +79,97 @@ client.on('error', (err) => {
   process.exit(1);
 });
 
-function startMenu() {
-  console.log('\n─── SELECT SIMULATION MODE ───');
-  Object.keys(MODES).forEach(key => {
-    console.log(`${key}. ${MODES[key].name}`);
+// ─── Step 1: Select Animal ───────────────────────────────────────────
+
+function selectAnimal() {
+  console.log('\n─── SELECT ANIMAL ───');
+  Object.keys(ANIMALS).forEach(key => {
+    console.log(`${key}. ${ANIMALS[key].name}  [ID: ${ANIMALS[key].id} / RFID: ${ANIMALS[key].rfid}]`);
   });
   console.log('Q. Quit');
 
-  rl.question('\nEnter choice (1-5): ', (choice) => {
+  rl.question('\nEnter animal (1-4): ', (choice) => {
     if (choice.toLowerCase() === 'q') {
       console.log('Exiting...');
       client.end();
       process.exit(0);
     }
-
-    const mode = MODES[choice];
-    if (!mode) {
+    const animal = ANIMALS[choice];
+    if (!animal) {
       console.log('❌ Invalid choice. Try again.');
-      startMenu();
+      selectAnimal();
       return;
     }
-
-    console.log(`\n🚀 Starting Simulation: ${mode.name}`);
-    console.log('Press Ctrl+C to stop this mode and return to menu.\n');
-
-    startSimulation(mode);
+    console.log(`\n🐄 Selected: ${animal.name}  (ID: ${animal.id})`);
+    selectMode(animal);
   });
 }
 
-function startSimulation(mode) {
-  const interval = setInterval(() => {
-    // 1. Temperature
-    const temp = jitter(mode.temp, 0.2).toFixed(1);
-    const tempPayload = JSON.stringify({ id: "Cow-001", rfid: "Rfid-001", val: temp });
-    client.publish(FEEDS.TEMP, tempPayload);
-    
-    // 2. BPM
-    const bpm = Math.round(jitter(mode.bpm, 2));
-    const bpmPayload = JSON.stringify({ id: "Cow-001", rfid: "Rfid-001", val: bpm });
-    client.publish(FEEDS.BPM, bpmPayload);
+// ─── Step 2: Select Mode ─────────────────────────────────────────────
 
-    // 3. Battery
-    let battery = mode.batt; 
-    if (mode.name.includes('LOW BATTERY')) {
-        battery = jitter(15, 1).toFixed(0);
-    } else {
-        battery = jitter(85, 0.5).toFixed(0);
+function selectMode(animal) {
+  console.log('\n─── SELECT SIMULATION MODE ───');
+  Object.keys(MODES).forEach(key => {
+    console.log(`${key}. ${MODES[key].name}`);
+  });
+  console.log('B. Back (change animal)');
+  console.log('Q. Quit');
+
+  rl.question('\nEnter mode (1-5): ', (choice) => {
+    if (choice.toLowerCase() === 'q') {
+      console.log('Exiting...');
+      client.end();
+      process.exit(0);
     }
-    const battPayload = JSON.stringify({ id: "Cow-001", rfid: "Rfid-001", val: battery });
-    client.publish(FEEDS.BATTERY, battPayload);
+    if (choice.toLowerCase() === 'b') {
+      selectAnimal();
+      return;
+    }
+    const mode = MODES[choice];
+    if (!mode) {
+      console.log('❌ Invalid choice. Try again.');
+      selectMode(animal);
+      return;
+    }
+    console.log(`\n🚀 Starting Simulation: ${animal.name} → ${mode.name}`);
+    console.log('Press Ctrl+C to stop and go back to menu.\n');
+    startSimulation(animal, mode);
+  });
+}
 
-    // 4. Humidity
+// ─── Step 3: Run Simulation ──────────────────────────────────────────
+
+function startSimulation(animal, mode) {
+  const interval = setInterval(() => {
+    const temp     = jitter(mode.temp, 0.2).toFixed(1);
+    const bpm      = Math.round(jitter(mode.bpm, 2));
+    const battery  = mode.name.includes('LOW BATTERY')
+                       ? jitter(15, 1).toFixed(0)
+                       : jitter(mode.batt, 0.5).toFixed(0);
     const humidity = Math.round(jitter(60, 5));
-    const humPayload = JSON.stringify({ id: "Cow-001", rfid: "Rfid-001", val: humidity });
-    client.publish(FEEDS.HUMIDITY, humPayload);
+    const gpsVal   = getGPS(
+                       GEOFENCE_CENTER.lat + animal.baseLat,
+                       GEOFENCE_CENTER.lon + animal.baseLon,
+                       mode.lat, mode.lon
+                     );
+    const geoStat  = (mode.lat === 0 && mode.lon === 0) ? 'Inside' : 'Outside';
 
-    // 5. GPS
-    const gpsData = getGPS(GEOFENCE_CENTER.lat, GEOFENCE_CENTER.lon, mode.lat, mode.lon);
-    const gpsPayload = JSON.stringify({ id: "Cow-001", rfid: "Rfid-001", val: gpsData });
-    client.publish(FEEDS.GPS, gpsPayload);
+    publish(FEEDS.TEMP,     animal, temp);
+    publish(FEEDS.BPM,      animal, bpm);
+    publish(FEEDS.BATTERY,  animal, battery);
+    publish(FEEDS.HUMIDITY, animal, humidity);
+    publish(FEEDS.GPS,      animal, gpsVal);
+    publish(FEEDS.GEOFENCE, animal, geoStat);
 
-    // 6. Geofence Status
-    const geofenceStatus = (mode.lat === 0 && mode.lon === 0) ? 'Inside' : 'Outside';
-    const geoPayload = JSON.stringify({ id: "Cow-001", rfid: "Rfid-001", val: geofenceStatus });
-    client.publish(FEEDS.GEOFENCE, geoPayload);
+    console.log(`📡 [${animal.id}] Temp=${temp}°C  BPM=${bpm}  Batt=${battery}%  Geo=${geoStat}`);
+  }, 5000);
 
-    console.log(`📡 Published (Cow-001 / Rfid-001): Temp=${temp}°C, BPM=${bpm}, Batt=${battery}%`);
-
-  }, 5000); // Publish every 5 seconds
-
-  // Handle Ctrl+C to stop interval but keep script running
   const onSigInt = () => {
     clearInterval(interval);
-    process.removeListener('SIGINT', onSigInt); // Remove this specific listener
+    rl.removeListener('SIGINT', onSigInt);
     console.log('\n🛑 Simulation stopped.');
-    startMenu();
+    selectAnimal(); // go back to animal selection
   };
 
-  // We need to override the default SIGINT behavior for readline
   rl.on('SIGINT', onSigInt);
 }
