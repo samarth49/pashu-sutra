@@ -1,11 +1,14 @@
 /**
  * Notification Service — Direct Twilio REST API
  * Sends SMS messages using Twilio's API directly from the client.
+ * Health alerts (temp/BPM) are enriched with GROQ LLM first aid
+ * advice and a nearby vet contact before sending.
  * (For demo/college project use — production apps should use a backend.)
  */
 
-import { TWILIO_CONFIG, HEALTH_THRESHOLDS } from '../config/constants';
+import { TWILIO_CONFIG, HEALTH_THRESHOLDS, getNearestVet } from '../config/constants';
 import { encode as btoa } from 'base-64';
+import { getFirstAidAdvice } from './groqService';
 
 // ─── Alert Message Templates ─────────────────────────────────────────
 
@@ -64,10 +67,31 @@ async function sendTwilioSMS(to, body) {
   }
 }
 
+// ─── Build Enriched SMS with LLM First Aid + Vet Contact ─────────────
+
+/**
+ * Builds an enriched SMS body:
+ *   base alert + GROQ first aid steps + nearest vet contact
+ * @param {string} baseMessage  - The standard alert text
+ * @param {string} firstAid     - LLM-generated first aid steps
+ * @returns {string}
+ */
+function buildEnrichedSMS(baseMessage, firstAid) {
+  const vet = getNearestVet();
+
+  return (
+    baseMessage +
+    `\n\n🩺 FIRST AID (AI Advice):\n${firstAid}` +
+    `\n\n📞 NEAREST VET:\n${vet.name}\n${vet.specialization}\n📍 ${vet.location}\n☎️  ${vet.phone}` +
+    `\n\n— Pashu-Sutra Alert System`
+  );
+}
+
 // ─── Public API ──────────────────────────────────────────────────────
 
 /**
- * Send a notification via Twilio SMS.
+ * Send a standard notification via Twilio SMS (no LLM enrichment).
+ * Used for geofence, battery, vaccination alerts.
  * @param {string} alertType - Template key
  * @param {Object} data - Alert-specific data
  */
@@ -94,18 +118,64 @@ export async function sendNotification(alertType, data) {
   }
 }
 
+/**
+ * Send a health alert SMS enriched with GROQ LLM first aid + vet contact.
+ * @param {'temperature'|'bpm'} llmAlertType
+ * @param {string} templateKey - key in ALERT_TEMPLATES
+ * @param {Object} data
+ */
+async function sendEnrichedHealthAlert(llmAlertType, templateKey, data) {
+  const { ALERT_PHONE } = TWILIO_CONFIG;
+
+  if (!ALERT_PHONE) {
+    console.warn('[Notify] ALERT_PHONE not set — skipping');
+    return { success: false, error: 'ALERT_PHONE not configured' };
+  }
+
+  try {
+    // Call GROQ and build base message in parallel for speed
+    const [firstAid, baseMessage] = await Promise.all([
+      getFirstAidAdvice(llmAlertType, data),
+      Promise.resolve(ALERT_TEMPLATES[templateKey](data)),
+    ]);
+
+    const enrichedBody = buildEnrichedSMS(baseMessage, firstAid);
+    console.log(`[Notify] Sending enriched ${llmAlertType} alert (${enrichedBody.length} chars)`);
+
+    return await sendTwilioSMS(ALERT_PHONE, enrichedBody);
+  } catch (error) {
+    console.error('[Notify] Enriched alert error:', error.message);
+    // Fallback to plain alert if LLM/compose step fails
+    return sendNotification(templateKey, data);
+  }
+}
+
 // ─── Convenience Methods ─────────────────────────────────────────────
 
 export function sendGeofenceAlert(rfidTag, latitude, longitude) {
   return sendNotification('geofence', { rfidTag, latitude, longitude });
 }
 
+/**
+ * High temperature alert — enriched with GROQ first aid + vet contact.
+ */
 export function sendHighTemperatureAlert(rfidTag, value, threshold) {
-  return sendNotification('temperature_high', { rfidTag, value, threshold });
+  return sendEnrichedHealthAlert(
+    'temperature',
+    'temperature_high',
+    { rfidTag, value, threshold, species: 'cow' }
+  );
 }
 
+/**
+ * High BPM alert — enriched with GROQ first aid + vet contact.
+ */
 export function sendHighBPMAlert(rfidTag, value, threshold) {
-  return sendNotification('bpm_high', { rfidTag, value, threshold });
+  return sendEnrichedHealthAlert(
+    'bpm',
+    'bpm_high',
+    { rfidTag, value, threshold, species: 'cow' }
+  );
 }
 
 export function sendLowBatteryAlert(rfidTag, value, threshold) {

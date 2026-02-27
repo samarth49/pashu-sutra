@@ -7,13 +7,13 @@ import { initializeApp } from 'firebase/app';
 import { initializeFirestore } from 'firebase/firestore';
 
 const firebaseConfig = {
-  apiKey: 'AIzaSyBHY0KVn7OplQsWQm6XwJMjOrIsKw4ySlI',
-  authDomain: 'pashu-sutra.firebaseapp.com',
-  projectId: 'pashu-sutra',
-  storageBucket: 'pashu-sutra.firebasestorage.app',
-  messagingSenderId: '730454388882',
-  appId: '1:730454388882:web:592cff260fdc020759764b',
-  measurementId: 'G-Y107E9TP5E',
+  apiKey: '',
+  authDomain: '',
+  projectId: '',
+  storageBucket: '',
+  messagingSenderId: '',
+  appId: '',
+  measurementId: '',
 };
 
 const app = initializeApp(firebaseConfig);

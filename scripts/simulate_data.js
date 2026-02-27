@@ -4,8 +4,8 @@ const readline = require('readline');
 // ─── Configuration ───────────────────────────────────────────────────
 
 const ADAFRUIT_IO = {
-  USERNAME: 'ProtonX',
-  AIO_KEY: 'aio_CgEp823IbWQjikfQCBoZq7QRaeDx',
+  USERNAME: 'Animalxyz',
+  AIO_KEY: 'aio_EwUG42Ma0MV3y6AbAjAuJfKcarG8',
   BROKER: 'io.adafruit.com',
   PORT: 8883,
 };
@@ -29,7 +29,6 @@ const ANIMALS = {
   1: { id: 'Cow-001',     rfid: 'Rfid-001', name: 'Lakshmi  (Cow)',     baseLat:  0.0000, baseLon:  0.0000 }, // at center
   2: { id: 'Cow-002',     rfid: 'Rfid-002', name: 'Nandini  (Cow)',     baseLat:  0.0003, baseLon:  0.0003 }, // ~35m NE
   3: { id: 'Buffalo-001', rfid: 'Rfid-003', name: 'Kaali    (Buffalo)', baseLat: -0.0003, baseLon:  0.0003 }, // ~35m SE
-  4: { id: 'Goat-001',    rfid: 'Rfid-004', name: 'Meenu    (Goat)',    baseLat:  0.0003, baseLon: -0.0003 }, // ~35m NW
 };
 
 // ─── Simulation Modes ────────────────────────────────────────────────

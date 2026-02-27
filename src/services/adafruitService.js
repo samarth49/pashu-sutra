@@ -28,29 +28,43 @@ let onDataCallback = null;
  * @param {Function} onStatusChange - callback receiving connection status string
  */
 export function connectMQTT(onData, onStatusChange) {
+  console.log('[MQTT] connectMQTT called.');
   onDataCallback = onData;
 
+  // Guard: if already connected, don't start another
+  if (mqttClient && mqttClient.isConnected()) {
+    console.log('[MQTT] Already connected. Skipping initialization.');
+    return;
+  }
+
   const clientId = 'PashuSutra_' + Math.random().toString(16).slice(2);
+  console.log('[MQTT] Creating new client with ID:', clientId);
 
   mqttClient = new Paho.Client(
-    'wss://io.adafruit.com/mqtt/',
+    'wss://io.adafruit.com/mqtt',
     clientId
   );
 
   mqttClient.onConnectionLost = (responseObject) => {
-    console.warn('[MQTT] Connection lost:', responseObject.errorMessage);
-    onStatusChange?.('disconnected');
-    // Auto-reconnect after a delay
-    setTimeout(() => connectMQTT(onData, onStatusChange), 5000);
+    if (responseObject.errorCode !== 0) {
+      console.warn('[MQTT] Connection lost:', responseObject.errorMessage);
+      onStatusChange?.('disconnected');
+      // Auto-reconnect after a delay
+      setTimeout(() => connectMQTT(onData, onStatusChange), 5000);
+    }
   };
 
   mqttClient.onMessageArrived = (message) => {
     const topic = message.destinationName;
     const value = message.payloadString;
-    const feedName = topic.split('/').pop(); // e.g. "gpsloc"
-    console.log(`[MQTT] ${feedName}: ${value}`);
+    const feedName = topic.split('/').pop();
+    
+    // VERY LOUD LOGGING for debugging
+    console.log('-------------------------------------------');
+    console.log(`📡 [MQTT RECEIVED] Topic: ${topic}`);
+    console.log(`📦 [MQTT VALUE]: ${value}`);
+    console.log('-------------------------------------------');
 
-    // Parse payload (expecting JSON now: { id: "cow1", rfid: "RFID-001", val: 38.5 })
     let parsedValue = value;
     let animalId = 'Unknown';
     let rfidTag = 'N/A';
@@ -60,11 +74,27 @@ export function connectMQTT(onData, onStatusChange) {
       if (json.val !== undefined) parsedValue = json.val;
       if (json.id) animalId = json.id;
       if (json.rfid) rfidTag = json.rfid;
+      console.log(`[MQTT Debug] JSON Parsed: id=${animalId}, val=${parsedValue}`);
     } catch (e) {
-      // Fallback for old plain text format
+      // ─── Support for "Livestock Record" multi-line format ──────────
+      if (value.includes('ID:')) {
+        const idMatch = value.match(/ID:\s*([^\s\n\r]+)/i);
+        if (idMatch) animalId = idMatch[1].trim();
+        
+        const rfidMatch = value.match(/RFID:\s*([^\s\n\r]+)/i);
+        if (rfidMatch) rfidTag = rfidMatch[1].trim();
+        else rfidTag = animalId;
+
+        const valMatch = value.match(/(\d+\.?\d*)/);
+        if (valMatch) parsedValue = valMatch[0];
+        
+        console.log(`[MQTT Debug] Record Parsed: id=${animalId}, val=${parsedValue}`);
+      } else {
+        console.log(`[MQTT Debug] Plain text used: ${value}`);
+      }
     }
 
-    // Save to Firestore (Persistence)
+    // Save for persistence
     saveSensorData({
       animalId,
       rfidTag,
@@ -73,21 +103,29 @@ export function connectMQTT(onData, onStatusChange) {
       unit: getUnit(feedName),
     });
 
-    onDataCallback?.({ feed: feedName, value: parsedValue, animalId, rfidTag, timestamp: new Date() });
+    // Send to UI
+    onDataCallback?.({ 
+      feed: feedName, 
+      value: parsedValue, 
+      animalId, 
+      rfidTag, 
+      timestamp: new Date() 
+    });
   };
 
   mqttClient.connect({
     useSSL: true,
     userName: ADAFRUIT_IO.USERNAME,
     password: ADAFRUIT_IO.AIO_KEY,
+    keepAliveInterval: 60,
+    cleanSession: true,
     onSuccess: () => {
-      console.log('[MQTT] Connected to Adafruit IO');
+      console.log('[MQTT] Success: Connected to Adafruit IO');
       onStatusChange?.('connected');
-      // Subscribe to all feeds
       Object.values(FEEDS).forEach((feed) => {
         const topic = `${ADAFRUIT_IO.USERNAME}/feeds/${feed}`;
         mqttClient.subscribe(topic);
-        console.log(`[MQTT] Subscribed: ${topic}`);
+        console.log(`[MQTT] Subscribed to topic: ${topic}`);
       });
     },
     onFailure: (err) => {
@@ -97,28 +135,20 @@ export function connectMQTT(onData, onStatusChange) {
   });
 }
 
-/**
- * Disconnect the MQTT client gracefully.
- */
 export function disconnectMQTT() {
-  if (mqttClient?.isConnected()) {
-    mqttClient.disconnect();
+  if (mqttClient) {
+    if (mqttClient.isConnected()) {
+      mqttClient.disconnect();
+    }
+    mqttClient = null;
   }
 }
-
-// ─── HTTP API (for historical / last-value data) ─────────────────────
 
 const headers = {
   'X-AIO-Key': ADAFRUIT_IO.AIO_KEY,
   'Content-Type': 'application/json',
 };
 
-/**
- * Fetch the last N data points for a specific feed.
- * @param {string} feedKey - e.g. "gpsloc"
- * @param {number} limit - number of data points
- * @returns {Promise<Array>} Array of { id, value, created_at }
- */
 export async function fetchFeedData(feedKey, limit = 50) {
   try {
     const url = `${ADAFRUIT_IO.HTTP_BASE}/${ADAFRUIT_IO.USERNAME}/feeds/${feedKey}/data?limit=${limit}`;
@@ -131,11 +161,6 @@ export async function fetchFeedData(feedKey, limit = 50) {
   }
 }
 
-/**
- * Fetch the latest value for a feed.
- * @param {string} feedKey
- * @returns {Promise<Object|null>} Latest data point or null
- */
 export async function fetchLatestValue(feedKey) {
   try {
     const url = `${ADAFRUIT_IO.HTTP_BASE}/${ADAFRUIT_IO.USERNAME}/feeds/${feedKey}/data/last`;

@@ -25,6 +25,7 @@ import {
   deleteVaccination,
 } from '../services/databaseService';
 import { useTranslation } from '../i18n/LanguageContext';
+import { useAnimal } from '../context/AnimalContext';
 
 // ─── Common Vaccines for Quick Select ─────────────────────────────
 const COMMON_VACCINES = [
@@ -40,6 +41,7 @@ const COMMON_VACCINES = [
 
 export default function HealthScreen() {
   const { t } = useTranslation();
+  const { selectedAnimal } = useAnimal();
   const [vaccinations, setVaccinations] = useState([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [filter, setFilter] = useState('all'); // all | scheduled | completed
@@ -80,9 +82,9 @@ export default function HealthScreen() {
       status: 'scheduled',
     });
 
-    // Reset form
-    setAnimalId('');
-    setRfidTag('');
+    // Reset form — restore selected animal defaults
+    setAnimalId(selectedAnimal?.id || '');
+    setRfidTag(selectedAnimal?.rfid || '');
     setVaccineName('');
     setDate('');
     setNotes('');
@@ -211,7 +213,14 @@ export default function HealthScreen() {
       {/* Add FAB */}
       <TouchableOpacity
         style={styles.fab}
-        onPress={() => setShowAddModal(true)}
+        onPress={() => {
+          // Pre-fill from the currently selected animal
+          if (selectedAnimal) {
+            setAnimalId(selectedAnimal.id || '');
+            setRfidTag(selectedAnimal.rfid || '');
+          }
+          setShowAddModal(true);
+        }}
       >
         <MaterialCommunityIcons name="plus" size={28} color="#fff" />
       </TouchableOpacity>

@@ -5,8 +5,8 @@
 
 // ─── Adafruit IO Configuration ───────────────────────────────────────
 export const ADAFRUIT_IO = {
-  USERNAME: 'ProtonX',
-  AIO_KEY: 'aio_CgEp823IbWQjikfQCBoZq7QRaeDx',
+  USERNAME: '',
+  AIO_KEY: '',
   BROKER: 'io.adafruit.com',
   PORT: 443, // WebSocket Secure
   HTTP_BASE: 'https://io.adafruit.com/api/v2',
@@ -39,13 +39,14 @@ export const GEOFENCE_DEFAULTS = {
   RADIUS_METERS: 50,
 };
 
-// ─── Twilio Configuration (direct API — for demo/college project) ────
+//─── Twilio Configuration (direct API — for demo/college project) ────
 export const TWILIO_CONFIG = {
-  ACCOUNT_SID: 'ACf774cccf614c27321d128561dd1df298',
-  AUTH_TOKEN: '4a9c2f99a2ceda6e7288d5012d7c4ee0',
-  FROM_PHONE: '+19787184365',
-  ALERT_PHONE: '+919765922414',  // ← Add your phone number here, e.g. '+919322970434'
+  ACCOUNT_SID: '',
+  AUTH_TOKEN: '',
+  FROM_PHONE: '',   // Twilio WhatsApp Sandbox
+  ALERT_PHONE: '', // Must have joined sandbox first
 };
+
 
 // ─── App Theme Colors (Animal Husbandry / Nature) ────────────────────
 export const COLORS = {
@@ -69,3 +70,40 @@ export const INTERVALS = {
   DATA_POLL_MS: 10000,
   VACCINATION_CHECK_MS: 3600000, // Check reminders every hour
 };
+
+// ─── GROQ LLM ───────────────────────────────────────────────────────
+export const GROQ_API_KEY = '';
+
+
+// ─── Nearby Veterinary Doctors (Mock Data) ───────────────────────────
+export const NEARBY_VETS = [
+  {
+    name: 'Dr.  1',
+    specialization: 'Bovine & Large Animal Medicine',
+    location: 'Pune Nagar Road, Pune',
+    phone: '',
+  },
+  {
+    name: 'Dr.  2',
+    specialization: 'Veterinary Internal Medicine',
+    location: 'Hadapsar, Pune',
+    phone: '',
+  },
+  {
+    name: 'Dr.3',
+    specialization: 'Livestock Health & Surgery',
+    location: 'Khed, Pune District',
+    phone: '',
+  },
+  
+];
+
+/**
+ * Returns a random vet from the NEARBY_VETS list.
+ * In a real app, this would be geo-sorted by distance.
+ * @returns {Object} vet contact
+ */
+export function getNearestVet() {
+  return NEARBY_VETS[Math.floor(Math.random() * NEARBY_VETS.length)];
+}
+

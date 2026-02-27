@@ -20,7 +20,7 @@ import {
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS, GEOFENCE_DEFAULTS, HEALTH_THRESHOLDS } from '../config/constants';
 import { connectMQTT, disconnectMQTT, fetchLatestValue } from '../services/adafruitService';
-import { addAlert, getLastGPS, getSensorHistory } from '../services/databaseService';
+import { addAlert, getLastGPS, getSensorHistory, estimateCoreTemp, classifyTemperature } from '../services/databaseService';
 import { sendGeofenceAlert, sendHighTemperatureAlert, sendHighBPMAlert, sendLowBatteryAlert } from '../services/notificationService';
 import TrackingMap from '../components/TrackingMap';
 import { useTranslation } from '../i18n/LanguageContext';
@@ -35,7 +35,8 @@ export default function DashboardScreen() {
   const [location, setLocation] = useState(null);
   const [battery, setBattery] = useState('--');
   const [geofenceStatus, setGeofenceStatus] = useState('Unknown');
-  const [temperature, setTemperature] = useState('--');
+  const [temperature, setTemperature] = useState('--');   // raw neck reading
+  const [coreTemp, setCoreTemp] = useState('--');           // ML-estimated core temp
   const [bpm, setBpm] = useState('--');
   const [humidity, setHumidity] = useState('--');
   const [lastUpdate, setLastUpdate] = useState(null);
@@ -114,86 +115,125 @@ export default function DashboardScreen() {
 
   const loadInitialData = async () => {
     try {
+      console.log('[Dashboard] Fetching initial data from Adafruit HTTP API...');
       const gps = await fetchLatestValue('gpsloc');
+      console.log('[Dashboard] Initial GPS:', gps?.value);
       if (gps?.value) parseGPSData(extractVal(gps.value));
 
       const bat = await fetchLatestValue('battery');
+      console.log('[Dashboard] Initial Battery:', bat?.value);
       if (bat?.value) setBattery(extractVal(bat.value));
 
       const geo = await fetchLatestValue('geofence');
+      console.log('[Dashboard] Initial Geofence:', geo?.value);
       if (geo?.value) setGeofenceStatus(extractVal(geo.value));
 
       const temp = await fetchLatestValue('temperature');
-      if (temp?.value) setTemperature(extractVal(temp.value));
+      console.log('[Dashboard] Initial Temperature:', temp?.value);
+      if (temp?.value) {
+        const neck = parseFloat(extractVal(temp.value));
+        setTemperature(neck.toFixed(1));
+        if (!isNaN(neck)) setCoreTemp(estimateCoreTemp(neck));
+      }
 
       const heartRate = await fetchLatestValue('bpm');
+      console.log('[Dashboard] Initial BPM:', heartRate?.value);
       if (heartRate?.value) setBpm(extractVal(heartRate.value));
 
       const hum = await fetchLatestValue('humidity');
+      console.log('[Dashboard] Initial Humidity:', hum?.value);
       if (hum?.value) setHumidity(extractVal(hum.value));
     } catch (e) {
       console.error('[Dashboard] Initial load error:', e);
     }
   };
 
-  const handleMQTTData = ({ feed, value }) => {
+  const handleMQTTData = ({ feed, value, animalId, rfidTag }) => {
     setLastUpdate(new Date());
+    console.log(`[Dashboard] Incoming: ${feed}=${value} (ID: ${animalId}, RFID: ${rfidTag})`);
 
-    // ── Parse JSON envelope: { id, rfid, val } ──────────────────────
-    let parsedVal = value;
-    let senderId = null;
-    try {
-      const obj = JSON.parse(value);
-      if (obj && obj.val !== undefined) {
-        parsedVal = String(obj.val);
-        senderId = obj.id;
-      }
-    } catch (_) {
-      // plain string value (legacy format) — use as-is
+    // ── Handle missing or Unknown IDs ──
+    let effectiveAnimalId = animalId;
+    let effectiveRfidTag = rfidTag;
+
+    if (!animalId || animalId === 'Unknown') {
+      // Fallback to Cow-004 as requested or the selected animal
+      effectiveAnimalId = selectedAnimal ? selectedAnimal.id : 'Cow-004';
+      effectiveRfidTag = rfidTag === 'N/A' ? (selectedAnimal?.rfid || 'Rfid-004') : rfidTag;
+      console.log(`[Dashboard] 💡 Unknown ID. Defaulting to: ${effectiveAnimalId} (RFID: ${effectiveRfidTag})`);
     }
 
-    // ── Only update dashboard if this message is from the selected animal ──
-    if (senderId && selectedAnimal && senderId !== selectedAnimal.id) return;
-
+    // ── TRIGGER ALERTS & GLOBAL UPDATES (Runs for ALL messages) ──
     switch (feed) {
       case 'gpsloc':
-        parseGPSData(parsedVal);
-        // Also refresh this animal's marker in the herd list
-        if (senderId) {
-          setAnimalMarkers(prev =>
-            prev.map(m =>
-              m.animal.id === senderId
-                ? { ...m, location: parseGPSCoords(parsedVal) }
-                : m
-            )
-          );
+        if (value !== '0') {
+          const loc = parseGPSCoords(value);
+          if (loc) {
+            setAnimalMarkers(prev =>
+              prev.map(m =>
+                m.animal.id === effectiveAnimalId
+                  ? { ...m, location: loc }
+                  : m
+              )
+            );
+          }
         }
         break;
       case 'battery':
-        setBattery(parsedVal);
-        checkBatteryAlert(parseFloat(parsedVal));
+        checkBatteryAlert(parseFloat(value), effectiveRfidTag);
         break;
       case 'geofence':
-        setGeofenceStatus(parsedVal);
-        if (parsedVal.toLowerCase().includes('outside')) {
+        if (value.toLowerCase().includes('outside')) {
           addAlert({
             type: 'geofence',
-            message: 'Animal is outside the geofence!',
-            data: { value: parsedVal },
+            message: `Animal (${effectiveAnimalId}) is outside the geofence!`,
+            data: { value: value },
           });
-          sendGeofenceAlert('N/A', location?.latitude, location?.longitude);
+          sendGeofenceAlert(effectiveRfidTag, location?.latitude, location?.longitude);
         }
         break;
-      case 'temperature':
-        setTemperature(parsedVal);
-        checkTemperatureAlert(parseFloat(parsedVal));
+      case 'temperature': {
+        const neck = parseFloat(value);
+        if (!isNaN(neck)) {
+          const core = estimateCoreTemp(neck);
+          const health = classifyTemperature(core);
+          if (health.alert) checkTemperatureAlert(core, effectiveRfidTag);
+        }
         break;
+      }
       case 'bpm':
-        setBpm(parsedVal);
-        checkBPMAlert(parseFloat(parsedVal));
+        checkBPMAlert(parseFloat(value), effectiveRfidTag);
+        break;
+    }
+
+    // ── UPDATE UI (Only if this message belongs to the currently viewed animal) ──
+    if (selectedAnimal && effectiveAnimalId !== selectedAnimal.id) {
+      // Message is for another animal, don't change the dashboard dials
+      return;
+    }
+
+    switch (feed) {
+      case 'gpsloc':
+        if (value === '0') return;
+        parseGPSData(value);
+        break;
+      case 'battery':
+        setBattery(value);
+        break;
+      case 'geofence':
+        setGeofenceStatus(value);
+        break;
+      case 'temperature': {
+        const neck = parseFloat(value);
+        setTemperature(isNaN(neck) ? value : neck.toFixed(1));
+        if (!isNaN(neck)) setCoreTemp(estimateCoreTemp(neck));
+        break;
+      }
+      case 'bpm':
+        setBpm(value);
         break;
       case 'humidity':
-        setHumidity(parsedVal);
+        setHumidity(value);
         break;
     }
   };
@@ -211,7 +251,7 @@ export default function DashboardScreen() {
     return null;
   };
 
-  const checkTemperatureAlert = (temp) => {
+  const checkTemperatureAlert = (temp, rfidTag) => {
     if (temp > HEALTH_THRESHOLDS.TEMPERATURE_HIGH) {
       addAlert({
         type: 'health',
@@ -219,11 +259,11 @@ export default function DashboardScreen() {
         data: { value: temp, metric: 'temperature' },
       });
       // Send Twilio SMS
-      sendHighTemperatureAlert('N/A', temp, HEALTH_THRESHOLDS.TEMPERATURE_HIGH);
+      sendHighTemperatureAlert(rfidTag || 'N/A', temp, HEALTH_THRESHOLDS.TEMPERATURE_HIGH);
     }
   };
 
-  const checkBPMAlert = (heartRate) => {
+  const checkBPMAlert = (heartRate, rfidTag) => {
     if (heartRate > HEALTH_THRESHOLDS.BPM_HIGH) {
       addAlert({
         type: 'health',
@@ -231,11 +271,11 @@ export default function DashboardScreen() {
         data: { value: heartRate, metric: 'bpm' },
       });
       // Send Twilio SMS
-      sendHighBPMAlert('N/A', heartRate, HEALTH_THRESHOLDS.BPM_HIGH);
+      sendHighBPMAlert(rfidTag || 'N/A', heartRate, HEALTH_THRESHOLDS.BPM_HIGH);
     }
   };
 
-  const checkBatteryAlert = (batteryLevel) => {
+  const checkBatteryAlert = (batteryLevel, rfidTag) => {
     if (batteryLevel < HEALTH_THRESHOLDS.BATTERY_LOW) {
       addAlert({
         type: 'system',
@@ -243,7 +283,7 @@ export default function DashboardScreen() {
         data: { value: batteryLevel, metric: 'battery' },
       });
       // Send Twilio SMS
-      sendLowBatteryAlert('N/A', batteryLevel, HEALTH_THRESHOLDS.BATTERY_LOW);
+      sendLowBatteryAlert(rfidTag || 'N/A', batteryLevel, HEALTH_THRESHOLDS.BATTERY_LOW);
     }
   };
 
@@ -314,7 +354,7 @@ export default function DashboardScreen() {
     </View>
   );
 
-  const renderTempCard = (isTempHigh, temperature) => (
+  const renderTempCard = (isTempHigh, temperature, coreTemp) => (
     <View style={[Platform.OS === 'web' ? styles.cardWeb : styles.card, { borderLeftColor: isTempHigh ? COLORS.danger : COLORS.primary }]}>
       <MaterialCommunityIcons name="thermometer" size={28} color={isTempHigh ? COLORS.danger : COLORS.primary} />
       <View style={styles.cardTextContainer}>
@@ -322,6 +362,11 @@ export default function DashboardScreen() {
         <Text style={[styles.cardValue, isTempHigh && { color: COLORS.danger }]}>
           {temperature !== '--' ? `${parseFloat(temperature).toFixed(1)}°C` : '--'}
         </Text>
+        {coreTemp !== '--' && (
+          <Text style={{ fontSize: 10, color: COLORS.textSecondary, marginTop: 2 }}>
+            Core: {coreTemp}°C
+          </Text>
+        )}
       </View>
     </View>
   );
@@ -492,7 +537,7 @@ export default function DashboardScreen() {
         <View style={Platform.OS === 'web' ? styles.cardsContainerWeb : styles.cardsScrollRow}>
           {Platform.OS === 'web' ? (
              <View style={styles.cardsRowWeb}>
-                {renderTempCard(isTempHigh, temperature)}
+                {renderTempCard(isTempHigh, temperature, coreTemp)}
                 {renderBpmCard(isBpmHigh, bpm)}
                 {renderHumidityCard(humidity)}
              </View>
@@ -502,7 +547,7 @@ export default function DashboardScreen() {
               showsHorizontalScrollIndicator={false} 
               contentContainerStyle={styles.cardsRow}
             >
-                {renderTempCard(isTempHigh, temperature)}
+                {renderTempCard(isTempHigh, temperature, coreTemp)}
                 {renderBpmCard(isBpmHigh, bpm)}
                 {renderHumidityCard(humidity)}
             </ScrollView>
