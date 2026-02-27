@@ -4,8 +4,8 @@ const readline = require('readline');
 // ─── Configuration ───────────────────────────────────────────────────
 
 const ADAFRUIT_IO = {
-  USERNAME: 'Animalxyz',
-  AIO_KEY: 'aio_EwUG42Ma0MV3y6AbAjAuJfKcarG8',
+  USERNAME: '',
+  AIO_KEY: '',
   BROKER: 'io.adafruit.com',
   PORT: 8883,
 };
